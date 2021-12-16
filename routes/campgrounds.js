@@ -1,20 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const ExpressError = require('../utils/ExpressError')
 const catchAsync = require("../utils/catchAsync")
 const campGroundModel = require("../model/campground");
-const { campgroundSchema } = require("../schemas.js")
-const {isLoggedIn} = require("../middleware.js")
-
-const validateCamp = (req, res, next) => {
-    const { error } = campgroundSchema.validate(req.body);
-    if (error) {
-        const msg = error.details.map(el => el.message).join(',')
-        throw new ExpressError(msg, 400)
-    } else {
-        next()
-    }
-}
+const {isLoggedIn, validateCamp, isAuthor} = require("../middleware.js")
 
 router.get("/", async (req, res) => {
     const campgrounds = await campGroundModel.find({})
@@ -27,7 +15,13 @@ router.get("/new", isLoggedIn, async (req, res) => {
 
 router.get("/:id", catchAsync(async (req, res) => {
     const { id } = req.params
-    const camp = await campGroundModel.findById(id).populate("reviews")
+    const camp = await campGroundModel.findById(id).populate({
+        path: "reviews",
+        populate: {
+            path: "author",
+        }
+    }).populate("author")
+    console.log(camp)
     if (!camp){
         req.flash("error", "Campground not found")
         res.redirect("/campground")
@@ -38,12 +32,13 @@ router.get("/:id", catchAsync(async (req, res) => {
 router.post("/", isLoggedIn ,validateCamp, catchAsync(async (req, res, next) => {
     // if (!req.body.campground) throw new ExpressError("Not enough information", 404)
     const camp = new campGroundModel(req.body.campground)
+    camp.author = req.user._id; //req.user is from passport.session()   
     await camp.save()
     req.flash("success", "Campground created successfully")
     res.redirect(`/campground/${camp._id}`)
 }))
 
-router.get("/:id/edit",isLoggedIn , catchAsync(async (req, res) => {
+router.get("/:id/edit",isLoggedIn , isAuthor, catchAsync(async (req, res) => {
     const { id } = req.params
     const camp = await campGroundModel.findById(id)
     if (!camp){
@@ -53,14 +48,14 @@ router.get("/:id/edit",isLoggedIn , catchAsync(async (req, res) => {
     res.render("campground/edit", { camp })
 }))
 
-router.put("/:id", isLoggedIn ,validateCamp, catchAsync(async (req, res) => {
+router.put("/:id", isLoggedIn , isAuthor,validateCamp, catchAsync(async (req, res) => {
     const { id } = req.params
-    await campGroundModel.findByIdAndUpdate(id, req.body.campground, { new: true, runValidators: true })
+    const campground = await campGroundModel.findByIdAndUpdate(id, req.body.campground, { new: true, runValidators: true })
     req.flash("success", "Campground updated successfully")
-    res.redirect(`/campground/${id}`)
+    res.redirect(`/campground/${campground._id}`)
 }))
 
-router.delete("/:id",isLoggedIn , catchAsync(async (req, res) => {
+router.delete("/:id",isLoggedIn , isAuthor, catchAsync(async (req, res) => {
     const { id } = req.params;
     await campGroundModel.findByIdAndDelete(id) //need to findByIdAndDelete to triger mongoose middleware
     req.flash("success", "Campground deleted successfully")
